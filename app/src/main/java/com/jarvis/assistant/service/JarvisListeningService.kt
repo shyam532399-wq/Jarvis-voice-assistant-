@@ -109,7 +109,9 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     @Volatile private var liveMicThread: Thread? = null
 
     private fun listenLoop() {
+        var retryDelayMs = 1000L
         sendStatus("Gemini Live se connection ho raha hai...")
+        while (running && !Thread.currentThread().isInterrupted) {
         val request = Request.Builder()
             .url("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" +
                 java.net.URLEncoder.encode(apiKey, "UTF-8"))
@@ -182,7 +184,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 if (running && code != 1000) sendStatus(ReliabilityErrors.forSocket(code, reason))
             }
         })
-        while (running && !Thread.currentThread().isInterrupted) {
+        while (running && !Thread.currentThread().isInterrupted && !liveFailed) {
             try { Thread.sleep(250) } catch (_: InterruptedException) { break }
         }
         liveReady = false
@@ -193,6 +195,14 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         liveRecorder = null
         try { liveTrack?.pause(); liveTrack?.flush(); liveTrack?.stop(); liveTrack?.release() } catch (_: Exception) {}
         liveTrack = null
+        try { liveMicThread?.join(1200) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+        liveMicThread = null
+        if (running && !Thread.currentThread().isInterrupted) {
+            sendStatus("Gemini Live reconnect ho raha hai...")
+            try { Thread.sleep(retryDelayMs) } catch (_: InterruptedException) { break }
+            retryDelayMs = (retryDelayMs * 2).coerceAtMost(15000L)
+        }
+        }
     }
 
     private fun startLiveMicrophone(webSocket: okhttp3.WebSocket) {
@@ -252,6 +262,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 try { recorder?.stop() } catch (_: Exception) {}
                 try { recorder?.release() } catch (_: Exception) {}
                 if (liveRecorder === recorder) liveRecorder = null
+                if (liveMicThread === Thread.currentThread()) liveMicThread = null
             }
         }.also { it.start() }
     }
