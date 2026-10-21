@@ -94,7 +94,8 @@ class GeminiVoiceController(context: Context) {
                 .toString()
                 .toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+                .header("x-goog-api-key", apiKey.trim())
                 .post(body)
                 .build()
 
@@ -107,18 +108,23 @@ class GeminiVoiceController(context: Context) {
 
                 override fun onResponse(call: Call, response: okhttp3.Response) {
                     response.use {
+                        val responseBody = it.body?.string().orEmpty()
                         if (!it.isSuccessful) {
+                            val googleMessage = try {
+                                JSONObject(responseBody).getJSONObject("error").optString("message")
+                            } catch (_: Exception) { "" }
                             val message = when (it.code) {
-                                400 -> "Audio ya request format accept nahi hua. Dobara try karo."
-                                403 -> "Gemini API key reject hui. Setup mein key check karo."
-                                429 -> "Gemini free quota abhi khatam hai. Baad mein try karo."
-                                else -> "Gemini error ${it.code}. Dobara try karo."
+                                400 -> "Gemini request/audio format error: ${googleMessage.ifBlank { "400 Bad Request" }}"
+                                403 -> "Gemini API key ya project access reject hua: ${googleMessage.ifBlank { "403 Forbidden" }}"
+                                404 -> "Gemini model/API nahi mila (404): ${googleMessage.ifBlank { "Model name ya API access check karo." }}"
+                                429 -> "Gemini quota/rate limit: ${googleMessage.ifBlank { "Baad mein try karo." }}"
+                                else -> "Gemini error ${it.code}: ${googleMessage.ifBlank { "Dobara try karo." }}"
                             }
                             mainHandler.post { onUpdate(message, null) }
                             return
                         }
                         val responseText = try {
-                            JSONObject(it.body?.string().orEmpty())
+                            JSONObject(responseBody)
                                 .getJSONArray("candidates")
                                 .getJSONObject(0)
                                 .getJSONObject("content")
