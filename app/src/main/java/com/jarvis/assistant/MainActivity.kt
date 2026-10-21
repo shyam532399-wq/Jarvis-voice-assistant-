@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
                     var setupDone by remember { mutableStateOf(prefs.setupComplete && prefs.hasKey()) }
 
                     if (setupDone) {
-                        HomeScreen()
+                        HomeScreen(apiKey = prefs.geminiApiKey)
                     } else {
                         SetupWizardScreen(prefs = prefs, onSetupComplete = { setupDone = true })
                     }
