@@ -163,7 +163,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                     }
                     if (root.has("error")) {
                         val error = root.optJSONObject("error")?.optString("message").orEmpty()
-                        sendStatus("Gemini Live error: " + error.take(180))
+                        sendStatus(ReliabilityErrors.forSocket(null, error))
                     }
                 } catch (e: Exception) {
                     sendStatus("Live response parse nahi hua: " + (e.message ?: "unknown error").take(100))
@@ -173,13 +173,13 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
             override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
                 liveReady = false
                 liveFailed = true
-                if (running) sendStatus("Gemini Live connection fail: " + (t.message ?: "network/API key check karo").take(140))
+                if (running) sendStatus(ReliabilityErrors.forSocket(response?.code, t.message ?: response?.message.orEmpty()))
             }
 
             override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
                 liveReady = false
                 liveFailed = true
-                if (running) sendStatus("Gemini Live connection band ho gaya: " + reason.take(100))
+                if (running && code != 1000) sendStatus(ReliabilityErrors.forSocket(code, reason))
             }
         })
         while (running && !Thread.currentThread().isInterrupted) {
@@ -323,7 +323,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                     val message = try {
                         JSONObject(responseText).getJSONObject("error").optString("message")
                     } catch (_: Exception) { "HTTP ${response.code}" }
-                    sendStatus("Gemini error ${response.code}: ${message.take(180)}")
+                    sendStatus(ReliabilityErrors.forHttp(response.code, message))
                     return ""
                 }
                 JSONObject(responseText).getJSONArray("candidates")
