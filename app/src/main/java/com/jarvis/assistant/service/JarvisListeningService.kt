@@ -105,6 +105,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     @Volatile private var liveRecorder: AudioRecord? = null
     @Volatile private var liveTrack: android.media.AudioTrack? = null
     @Volatile private var liveReady = false
+    @Volatile private var liveFailed = false
     @Volatile private var liveMicThread: Thread? = null
 
     private fun listenLoop() {
@@ -113,19 +114,23 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
             .url("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" +
                 java.net.URLEncoder.encode(apiKey, "UTF-8"))
             .build()
+        liveFailed = false
         liveSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 val setup = JSONObject()
                     .put("setup", JSONObject()
                         .put("model", "models/gemini-3.8-live")
-                        .put("responseModalities", JSONArray().put("AUDIO"))
+                        .put("generationConfig", JSONObject()
+                            .put("responseModalities", JSONArray().put("AUDIO")))
                         .put("systemInstruction", JSONObject().put("parts", JSONArray().put(
                             JSONObject().put("text",
-                                "You are Jarvis, a calm Android voice assistant. Speak naturally in Hindi or Hinglish, keep replies concise, and handle interruptions naturally. You may explain how to open apps or use the dialer. Never claim a call was placed or a WhatsApp message was sent unless the user completes it manually. Ask for confirmation before any consequential action.")
+                                "You are Jarvis, a calm Android voice assistant. Speak naturally in Hindi or Hinglish, keep replies concise, and handle interruptions naturally. You may open YouTube, Chrome, WhatsApp, or the phone dialer only when the user clearly asks. Never place calls or send messages automatically. If a user asks to call someone or send a WhatsApp message, explain that you can open the dialer or WhatsApp, but the user must review and confirm the action themselves.")
                         )))
-                        .put("inputAudioTranscription", JSONObject())
-                        .put("outputAudioTranscription", JSONObject()))
-                webSocket.send(setup.toString())
+                        .put("inputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("hi-IN").put("en-IN")))
+                        .put("outputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("hi-IN").put("en-IN"))))
+                if (!webSocket.send(setup.toString())) {
+                    sendStatus("Gemini Live setup send nahi hua.")
+                }
             }
 
             override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
@@ -167,11 +172,13 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
 
             override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
                 liveReady = false
+                liveFailed = true
                 if (running) sendStatus("Gemini Live connection fail: " + (t.message ?: "network/API key check karo").take(140))
             }
 
             override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
                 liveReady = false
+                liveFailed = true
                 if (running) sendStatus("Gemini Live connection band ho gaya: " + reason.take(100))
             }
         })
