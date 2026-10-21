@@ -180,3 +180,17 @@ private fun startJarvisService(context: Context, apiKey: String, onStarted: () -
         // Avoid claiming the service started if Android rejected the request.
     }
 }
+
+private fun launchPhoneApp(context: Context, packageName: String) {
+    try {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(launchIntent)
+        } else {
+            android.widget.Toast.makeText(context, "Yeh app installed nahi hai.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    } catch (_: Exception) {
+        android.widget.Toast.makeText(context, "App open nahi ho saki.", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
