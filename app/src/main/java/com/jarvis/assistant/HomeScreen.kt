@@ -122,6 +122,23 @@ fun HomeScreen(apiKey: String) {
             Text(if (listening) "Stop Jarvis" else "Start Jarvis")
         }
 
+
+        Spacer(Modifier.height(24.dp))
+        Text("PHONE SHORTCUTS", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(modifier = Modifier.weight(1f), onClick = { launchPhoneApp(context, "com.google.android.youtube") }) { Text("YouTube") }
+            OutlinedButton(modifier = Modifier.weight(1f), onClick = { launchPhoneApp(context, "com.android.chrome") }) { Text("Chrome") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(modifier = Modifier.weight(1f), onClick = { launchPhoneApp(context, "com.whatsapp") }) { Text("WhatsApp") }
+            OutlinedButton(modifier = Modifier.weight(1f), onClick = {
+                try { context.startActivity(Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                catch (_: Exception) { status = "Phone dialer nahi khula." }
+            }) { Text("Call / Dialer") }
+        }
+
+        Spacer(Modifier.height(12.dp))
         if (answer.isNotBlank()) {
             Spacer(Modifier.height(22.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
