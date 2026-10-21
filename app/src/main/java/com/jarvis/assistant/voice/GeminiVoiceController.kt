@@ -94,7 +94,7 @@ class GeminiVoiceController(context: Context) {
                 .toString()
                 .toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
                 .header("x-goog-api-key", apiKey.trim())
                 .post(body)
                 .build()
