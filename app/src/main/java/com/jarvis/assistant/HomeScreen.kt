@@ -39,6 +39,23 @@ fun HomeScreen(apiKey: String) {
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == "com.jarvis.assistant.action.PHONE_COMMAND") {
+                    when (intent.getStringExtra("command")) {
+                        "youtube" -> launchPhoneApp(context ?: return, "com.google.android.youtube")
+                        "chrome" -> launchPhoneApp(context ?: return, "com.android.chrome")
+                        "whatsapp" -> launchPhoneApp(context ?: return, "com.whatsapp")
+                        "dialer" -> {
+                            try {
+                                (context ?: return).startActivity(
+                                    Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            } catch (_: Exception) {
+                                status = "Phone dialer nahi khula."
+                            }
+                        }
+                    }
+                    return
+                }
                 if (intent?.action != JarvisListeningService.ACTION_STATUS) return
                 status = intent.getStringExtra(JarvisListeningService.EXTRA_STATUS) ?: status
                 val newAnswer = intent.getStringExtra(JarvisListeningService.EXTRA_ANSWER)
@@ -48,7 +65,10 @@ fun HomeScreen(apiKey: String) {
                     !status.contains("initialize nahi", ignoreCase = true)
             }
         }
-        val filter = IntentFilter(JarvisListeningService.ACTION_STATUS)
+        val filter = IntentFilter().apply {
+            addAction(JarvisListeningService.ACTION_STATUS)
+            addAction("com.jarvis.assistant.action.PHONE_COMMAND")
+        }
         ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose {
             try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
@@ -152,7 +172,7 @@ fun HomeScreen(apiKey: String) {
 
         Spacer(Modifier.height(18.dp))
         Text(
-            "Start dabane ke baad Jarvis background mein sunta rahega. Baat khatam karke thoda rukna; jawab voice mein aayega. Mic par beep nahi. Notification se bhi Stop kar sakte ho.",
+            "Start dabane ke baad Gemini Live se real-time two-way audio chalta hai. Hindi/Hinglish mein baat karo. Mic start/stop aur notification silent hain. Voice se YouTube, Chrome, WhatsApp ya dialer khul sakta hai.",
             color = TextSecondary,
             style = MaterialTheme.typography.bodySmall
         )
