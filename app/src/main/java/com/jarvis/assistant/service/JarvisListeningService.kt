@@ -184,7 +184,10 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         } catch (_: SecurityException) {
             sendStatus("Microphone permission allow karo, phir Jarvis start karo.")
         } catch (_: Exception) {
-            if (running) sendStatus("Background listening ruk gayi. App dobara kholkar Start karo.")
+            if (running) {
+                sendStatus("Background listening ruk gayi. App dobara kholkar Start karo.")
+                running = false
+            }
         } finally {
             try { audioRecord?.stop() } catch (_: Exception) {}
             try { audioRecord?.release() } catch (_: Exception) {}
@@ -288,8 +291,10 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
             putExtra(EXTRA_STATUS, status)
             if (answer != null) putExtra(EXTRA_ANSWER, answer)
         })
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(status.take(80)))
+        if (running) {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.notify(NOTIFICATION_ID, buildNotification(status.take(80)))
+        }
     }
 
     private fun buildNotification(line: String = "Listening silently in background"): Notification {
