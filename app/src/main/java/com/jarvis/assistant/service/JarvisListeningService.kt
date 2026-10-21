@@ -12,6 +12,7 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import com.jarvis.assistant.MainActivity
@@ -25,6 +26,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
 
@@ -53,6 +55,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     @Volatile private var running = false
     @Volatile private var apiKey: String = ""
     private var worker: Thread? = null
+    @Volatile private var activeRecorder: AudioRecord? = null
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
 
@@ -115,6 +118,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 AudioFormat.ENCODING_PCM_16BIT,
                 maxOf(minBuffer * 2, 4096)
             )
+            activeRecorder = audioRecord
             if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
                 sendStatus("Microphone initialize nahi hua. Permission check karo.")
                 stopListening()
@@ -174,6 +178,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         } finally {
             try { audioRecord?.stop() } catch (_: Exception) {}
             try { audioRecord?.release() } catch (_: Exception) {}
+            activeRecorder = null
         }
     }
 
@@ -252,8 +257,19 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(text: String) {
-        if (ttsReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        if (!ttsReady) return
+        val engine = tts ?: return
+        val finished = CountDownLatch(1)
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) { finished.countDown() }
+            @Deprecated("Deprecated in Android API")
+            override fun onError(utteranceId: String?) { finished.countDown() }
+            override fun onError(utteranceId: String?, errorCode: Int) { finished.countDown() }
+        })
+        engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis_reply")
+        try { finished.await(25, TimeUnit.SECONDS) } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
@@ -303,6 +319,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     private fun stopListening() {
         running = false
         try { worker?.interrupt() } catch (_: Exception) {}
+        try { activeRecorder?.stop() } catch (_: Exception) {}
         worker = null
         try { tts?.stop() } catch (_: Exception) {}
         sendStatus("Jarvis listening band hai.")
