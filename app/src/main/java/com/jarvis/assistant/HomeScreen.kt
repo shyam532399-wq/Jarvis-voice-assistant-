@@ -60,9 +60,24 @@ fun HomeScreen(apiKey: String) {
                 status = intent.getStringExtra(JarvisListeningService.EXTRA_STATUS) ?: status
                 val newAnswer = intent.getStringExtra(JarvisListeningService.EXTRA_ANSWER)
                 if (!newAnswer.isNullOrBlank()) answer = newAnswer
-                listening = !status.contains("band hai", ignoreCase = true) &&
-                    !status.contains("permission allow", ignoreCase = true) &&
-                    !status.contains("initialize nahi", ignoreCase = true)
+                val normalized = status.lowercase()
+                listening = when {
+                    normalized.contains("listening band hai") -> false
+                    normalized.contains("permission allow") -> false
+                    normalized.contains("initialize nahi") -> false
+                    normalized.contains("buffer available nahi") -> false
+                    normalized.contains("connection fail") -> false
+                    normalized.contains("connection band ho gaya") -> false
+                    normalized.contains("live error") -> false
+                    normalized.contains("setup send nahi hua") -> false
+                    normalized.contains("audio send nahi hua") -> false
+                    normalized.contains("mic error") -> false
+                    normalized.contains("connected") -> true
+                    normalized.contains("live listening") -> true
+                    normalized.contains("connection ho raha") -> true
+                    normalized.contains("listening") -> true
+                    else -> listening
+                }
             }
         }
         val filter = IntentFilter().apply {
@@ -80,7 +95,7 @@ fun HomeScreen(apiKey: String) {
     ) { granted ->
         if (granted) startJarvisService(context, apiKey) {
             listening = true
-            status = "Jarvis background mein sun raha hai. Baat karo; rukne par jawab dega."
+            status = "Gemini Live connect ho raha hai..."
         } else {
             status = "Microphone permission zaroori hai. Android Settings mein allow karo."
         }
@@ -172,7 +187,7 @@ fun HomeScreen(apiKey: String) {
 
         Spacer(Modifier.height(18.dp))
         Text(
-            "Start dabane ke baad Gemini Live se real-time two-way audio chalta hai. Hindi/Hinglish mein baat karo. Mic start/stop aur notification silent hain. Voice se YouTube, Chrome, WhatsApp ya dialer khul sakta hai.",
+            "Start dabane ke baad Gemini Live connection banta hai. Connect status aane par Hindi/Hinglish mein baat karo. Mic aur notification silent configure hain; device par sound test karna zaroori hai. Voice se YouTube, Chrome, WhatsApp ya dialer kholne ko keh sakte ho.",
             color = TextSecondary,
             style = MaterialTheme.typography.bodySmall
         )
