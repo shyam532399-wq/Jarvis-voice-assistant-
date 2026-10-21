@@ -11,6 +11,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
@@ -56,6 +57,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
     @Volatile private var apiKey: String = ""
     private var worker: Thread? = null
     @Volatile private var activeRecorder: AudioRecord? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
 
@@ -89,6 +91,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 if (!running) {
                     apiKey = key
                     startForeground(NOTIFICATION_ID, buildNotification())
+                    acquireWakeLock()
                     running = true
                     sendStatus("Jarvis background mein sun raha hai. Baat karo; rukne par jawab dega.")
                     worker = Thread { listenLoop() }.also { it.start() }
@@ -162,7 +165,14 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                             val answer = askGemini(captured)
                             if (answer.isNotBlank() && running) {
                                 sendStatus("Jarvis: $answer", answer)
+                                try { audioRecord.stop() } catch (_: Exception) {}
                                 speak(answer)
+                                if (running) {
+                                    try { audioRecord.startRecording() } catch (_: Exception) {
+                                        sendStatus("Mic dobara start nahi hua. Jarvis stop karke phir start karo.")
+                                        running = false
+                                    }
+                                }
                             } else if (running) {
                                 sendStatus("Jawab nahi mila. Phir se bolo.")
                             }
@@ -316,10 +326,22 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun acquireWakeLock() {
+        try {
+            val power = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JarvisAI:ContinuousListening")
+                .apply { setReferenceCounted(false); acquire() }
+        } catch (_: Exception) {
+            sendStatus("Background wake lock nahi mila; battery saver listening rok sakta hai.")
+        }
+    }
+
     private fun stopListening() {
         running = false
         try { worker?.interrupt() } catch (_: Exception) {}
         try { activeRecorder?.stop() } catch (_: Exception) {}
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+        wakeLock = null
         worker = null
         try { tts?.stop() } catch (_: Exception) {}
         sendStatus("Jarvis listening band hai.")
