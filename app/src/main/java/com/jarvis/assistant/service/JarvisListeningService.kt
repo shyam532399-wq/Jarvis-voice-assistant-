@@ -101,98 +101,195 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         return START_STICKY
     }
 
+    @Volatile private var liveSocket: okhttp3.WebSocket? = null
+    @Volatile private var liveRecorder: AudioRecord? = null
+    @Volatile private var liveTrack: android.media.AudioTrack? = null
+    @Volatile private var liveReady = false
+    @Volatile private var liveMicThread: Thread? = null
+
     private fun listenLoop() {
-        val minBuffer = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
-        if (minBuffer <= 0) {
-            sendStatus("Is device par microphone recording start nahi ho saki.")
-            stopListening()
-            stopSelf()
-            return
-        }
-
-        var audioRecord: AudioRecord? = null
-        try {
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer * 2, 4096)
-            )
-            activeRecorder = audioRecord
-            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                sendStatus("Microphone initialize nahi hua. Permission check karo.")
-                stopListening()
-                stopSelf()
-                return
+        sendStatus("Gemini Live se connection ho raha hai...")
+        val request = Request.Builder()
+            .url("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=" +
+                java.net.URLEncoder.encode(apiKey, "UTF-8"))
+            .build()
+        liveSocket = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
+            override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                val setup = JSONObject()
+                    .put("setup", JSONObject()
+                        .put("model", "models/gemini-3.8-live")
+                        .put("responseModalities", JSONArray().put("AUDIO"))
+                        .put("systemInstruction", JSONObject().put("parts", JSONArray().put(
+                            JSONObject().put("text",
+                                "You are Jarvis, a calm Android voice assistant. Speak naturally in Hindi or Hinglish, keep replies concise, and handle interruptions naturally. You may explain how to open apps or use the dialer. Never claim a call was placed or a WhatsApp message was sent unless the user completes it manually. Ask for confirmation before any consequential action.")
+                        )))
+                        .put("inputAudioTranscription", JSONObject())
+                        .put("outputAudioTranscription", JSONObject()))
+                webSocket.send(setup.toString())
             }
-            audioRecord.startRecording()
-            val buffer = ShortArray(1024)
-            val utterance = ArrayList<Short>(SAMPLE_RATE * 8)
-            var voiceStarted = false
-            var silenceSamples = 0
-            var speechSamples = 0
-            val silenceLimit = (SAMPLE_RATE * 1.2).toInt()
-            val maxSpeechSamples = SAMPLE_RATE * 12
-            val threshold = 650.0
 
-            while (running && !Thread.currentThread().isInterrupted) {
-                val count = audioRecord.read(buffer, 0, buffer.size)
-                if (count <= 0) continue
-                var sum = 0.0
-                for (i in 0 until count) sum += buffer[i].toDouble() * buffer[i].toDouble()
-                val rms = sqrt(sum / count)
-                if (!voiceStarted && rms >= threshold) {
-                    voiceStarted = true
-                    utterance.clear()
-                    speechSamples = 0
-                    silenceSamples = 0
-                    sendStatus("Jarvis sun raha hai...")
-                }
-                if (voiceStarted) {
-                    for (i in 0 until count) utterance.add(buffer[i])
-                    speechSamples += count
-                    if (rms < threshold * 0.55) silenceSamples += count else silenceSamples = 0
-                    if (silenceSamples >= silenceLimit || speechSamples >= maxSpeechSamples) {
-                        val captured = utterance.toShortArray()
-                        voiceStarted = false
-                        utterance.clear()
-                        silenceSamples = 0
-                        speechSamples = 0
-                        if (captured.size >= SAMPLE_RATE / 2) {
-                            val answer = askGemini(captured)
-                            if (answer.isNotBlank() && running) {
-                                sendStatus("Jarvis: $answer", answer)
-                                try { audioRecord.stop() } catch (_: Exception) {}
-                                speak(answer)
-                                if (running) {
-                                    try { audioRecord.startRecording() } catch (_: Exception) {
-                                        sendStatus("Mic dobara start nahi hua. Jarvis stop karke phir start karo.")
-                                        running = false
-                                    }
-                                }
-                            } else if (running) {
-                                sendStatus("Jawab nahi mila. Phir se bolo.")
+            override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
+                try {
+                    val root = JSONObject(text)
+                    if (root.has("setupComplete")) {
+                        liveReady = true
+                        sendStatus("Gemini Live connected. Hindi/Hinglish mein baat karo.")
+                        startLiveMicrophone(webSocket)
+                        return
+                    }
+                    val server = root.optJSONObject("serverContent")
+                    if (server != null) {
+                        val inputText = server.optJSONObject("inputTranscription")?.optString("text").orEmpty()
+                        if (inputText.isNotBlank()) handleVoiceCommand(inputText)
+                        val outputText = server.optJSONObject("outputTranscription")?.optString("text").orEmpty()
+                        if (outputText.isNotBlank()) sendStatus("Jarvis: " + outputText.take(160), outputText)
+                        val parts = server.optJSONObject("modelTurn")?.optJSONArray("parts")
+                        if (parts != null) {
+                            for (i in 0 until parts.length()) {
+                                val part = parts.optJSONObject(i) ?: continue
+                                val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
+                                val encoded = inline?.optString("data").orEmpty()
+                                if (encoded.isNotBlank()) playLiveAudio(Base64.decode(encoded, Base64.DEFAULT))
                             }
                         }
-                        if (running) sendStatus("Jarvis background mein sun raha hai. Baat karo.")
+                        if (server.optBoolean("turnComplete", false)) {
+                            sendStatus("Gemini Live connected. Baat jaari rakho.")
+                        }
                     }
+                    if (root.has("error")) {
+                        val error = root.optJSONObject("error")?.optString("message").orEmpty()
+                        sendStatus("Gemini Live error: " + error.take(180))
+                    }
+                } catch (e: Exception) {
+                    sendStatus("Live response parse nahi hua: " + (e.message ?: "unknown error").take(100))
                 }
             }
-        } catch (_: SecurityException) {
-            sendStatus("Microphone permission allow karo, phir Jarvis start karo.")
-        } catch (_: Exception) {
-            if (running) {
-                sendStatus("Background listening ruk gayi. App dobara kholkar Start karo.")
-                running = false
+
+            override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                liveReady = false
+                if (running) sendStatus("Gemini Live connection fail: " + (t.message ?: "network/API key check karo").take(140))
             }
-        } finally {
-            try { audioRecord?.stop() } catch (_: Exception) {}
-            try { audioRecord?.release() } catch (_: Exception) {}
-            activeRecorder = null
+
+            override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+                liveReady = false
+                if (running) sendStatus("Gemini Live connection band ho gaya: " + reason.take(100))
+            }
+        })
+        while (running && !Thread.currentThread().isInterrupted) {
+            try { Thread.sleep(250) } catch (_: InterruptedException) { break }
         }
+        liveReady = false
+        try { liveSocket?.close(1000, "Jarvis stopped") } catch (_: Exception) {}
+        liveSocket = null
+        try { liveRecorder?.stop() } catch (_: Exception) {}
+        try { liveRecorder?.release() } catch (_: Exception) {}
+        liveRecorder = null
+        try { liveTrack?.pause(); liveTrack?.flush(); liveTrack?.stop(); liveTrack?.release() } catch (_: Exception) {}
+        liveTrack = null
+    }
+
+    private fun startLiveMicrophone(webSocket: okhttp3.WebSocket) {
+        if (liveMicThread?.isAlive == true) return
+        liveMicThread = Thread {
+            val minBuffer = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBuffer <= 0) {
+                sendStatus("Microphone buffer available nahi hai.")
+                return@Thread
+            }
+            var recorder: AudioRecord? = null
+            try {
+                recorder = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minBuffer * 2, 4096)
+                )
+                liveRecorder = recorder
+                if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                    sendStatus("Mic initialize nahi hua. Permission check karo.")
+                    return@Thread
+                }
+                try {
+                    val echoCanceler = android.media.audiofx.AcousticEchoCanceler.create(recorder.audioSessionId)
+                    echoCanceler?.enabled = true
+                } catch (_: Exception) {}
+                recorder.startRecording()
+                val shorts = ShortArray(1024)
+                sendStatus("LIVE listening — bolte raho, Jarvis turant jawab dega.")
+                while (running && liveReady && !Thread.currentThread().isInterrupted) {
+                    val count = recorder.read(shorts, 0, shorts.size)
+                    if (count <= 0) continue
+                    val bytes = ByteArray(count * 2)
+                    for (i in 0 until count) {
+                        val value = shorts[i].toInt()
+                        bytes[i * 2] = (value and 0xff).toByte()
+                        bytes[i * 2 + 1] = ((value shr 8) and 0xff).toByte()
+                    }
+                    val audio = JSONObject()
+                        .put("realtimeInput", JSONObject().put("audio", JSONObject()
+                            .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                            .put("mimeType", "audio/pcm;rate=16000")))
+                    if (!webSocket.send(audio.toString())) {
+                        sendStatus("Live audio send nahi hua; connection check karo.")
+                        break
+                    }
+                }
+            } catch (_: SecurityException) {
+                sendStatus("Microphone permission allow karo.")
+            } catch (e: Exception) {
+                if (running) sendStatus("Live mic error: " + (e.message ?: "unknown").take(120))
+            } finally {
+                try { recorder?.stop() } catch (_: Exception) {}
+                try { recorder?.release() } catch (_: Exception) {}
+                if (liveRecorder === recorder) liveRecorder = null
+            }
+        }.also { it.start() }
+    }
+
+    private fun playLiveAudio(pcm: ByteArray) {
+        try {
+            var track = liveTrack
+            if (track == null) {
+                val min = android.media.AudioTrack.getMinBufferSize(
+                    24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+                )
+                track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(24000)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                    .setBufferSizeInBytes(maxOf(min, 8192))
+                    .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+                    .build()
+                liveTrack = track
+                track.play()
+            }
+            track.write(pcm, 0, pcm.size)
+        } catch (e: Exception) {
+            sendStatus("Audio playback error: " + (e.message ?: "unknown").take(100))
+        }
+    }
+
+    private fun handleVoiceCommand(spoken: String) {
+        val text = spoken.lowercase(Locale.ROOT)
+        val target = when {
+            text.contains("open youtube") || text.contains("youtube kholo") || text.contains("यूट्यूब खोलो") -> "youtube"
+            text.contains("open chrome") || text.contains("chrome kholo") || text.contains("क्रोम खोलो") -> "chrome"
+            text.contains("open whatsapp") || text.contains("whatsapp kholo") || text.contains("व्हाट्सऐप खोलो") -> "whatsapp"
+            text.contains("open dialer") || text.contains("dialer kholo") || text.contains("call screen kholo") || text.contains("dialer खोलो") -> "dialer"
+            else -> return
+        }
+        sendBroadcast(Intent("com.jarvis.assistant.action.PHONE_COMMAND").setPackage(packageName)
+            .putExtra("command", target))
+        sendStatus("Command samjha: $target. App screen par action khulega.")
     }
 
     private fun askGemini(samples: ShortArray): String {
@@ -343,6 +440,12 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
 
     private fun stopListening() {
         running = false
+        liveReady = false
+        try { liveSocket?.close(1000, "Jarvis stopped") } catch (_: Exception) {}
+        liveSocket = null
+        try { liveRecorder?.stop() } catch (_: Exception) {}
+        try { liveTrack?.pause(); liveTrack?.flush(); liveTrack?.stop(); liveTrack?.release() } catch (_: Exception) {}
+        liveTrack = null
         try { worker?.interrupt() } catch (_: Exception) {}
         try { activeRecorder?.stop() } catch (_: Exception) {}
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
