@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.audiofx.AcousticEchoCanceler
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
@@ -103,6 +104,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
 
     @Volatile private var liveSocket: okhttp3.WebSocket? = null
     @Volatile private var liveRecorder: AudioRecord? = null
+    @Volatile private var liveEchoCanceler: AcousticEchoCanceler? = null
     @Volatile private var liveTrack: android.media.AudioTrack? = null
     @Volatile private var liveReady = false
     @Volatile private var liveFailed = false
@@ -196,12 +198,15 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
             liveFailed = true
             sendStatus("Gemini Live 15 second mein ready nahi hua. Network/API key check kar raha hoon; retry hoga.")
         }
+        if (liveReady) retryDelayMs = 1000L
         liveReady = false
         try { liveSocket?.close(1000, "Jarvis stopped") } catch (_: Exception) {}
         liveSocket = null
         try { liveRecorder?.stop() } catch (_: Exception) {}
         try { liveRecorder?.release() } catch (_: Exception) {}
         liveRecorder = null
+        try { liveEchoCanceler?.release() } catch (_: Exception) {}
+        liveEchoCanceler = null
         try { liveTrack?.pause(); liveTrack?.flush(); liveTrack?.stop(); liveTrack?.release() } catch (_: Exception) {}
         liveTrack = null
         try { liveMicThread?.join(1200) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
@@ -239,8 +244,8 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                     return@Thread
                 }
                 try {
-                    val echoCanceler = android.media.audiofx.AcousticEchoCanceler.create(recorder.audioSessionId)
-                    echoCanceler?.enabled = true
+                    liveEchoCanceler = AcousticEchoCanceler.create(recorder.audioSessionId)
+                    liveEchoCanceler?.enabled = true
                 } catch (_: Exception) {}
                 recorder.startRecording()
                 val shorts = ShortArray(1024)
@@ -271,6 +276,8 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 try { recorder?.stop() } catch (_: Exception) {}
                 try { recorder?.release() } catch (_: Exception) {}
                 if (liveRecorder === recorder) liveRecorder = null
+                try { liveEchoCanceler?.release() } catch (_: Exception) {}
+                liveEchoCanceler = null
                 if (liveMicThread === Thread.currentThread()) liveMicThread = null
             }
         }.also { it.start() }
@@ -471,6 +478,10 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
         try { liveSocket?.close(1000, "Jarvis stopped") } catch (_: Exception) {}
         liveSocket = null
         try { liveRecorder?.stop() } catch (_: Exception) {}
+        try { liveRecorder?.release() } catch (_: Exception) {}
+        liveRecorder = null
+        try { liveEchoCanceler?.release() } catch (_: Exception) {}
+        liveEchoCanceler = null
         try { liveTrack?.pause(); liveTrack?.flush(); liveTrack?.stop(); liveTrack?.release() } catch (_: Exception) {}
         liveTrack = null
         try { worker?.interrupt() } catch (_: Exception) {}
