@@ -15,7 +15,7 @@ sealed class KeyTestResult {
 object GeminiKeyTester {
 
     private val client = OkHttpClient()
-    private const val MODEL = "gemini-1.5-flash"
+    private const val MODEL = "gemini-3.8-flash"
 
     fun test(apiKey: String, onResult: (KeyTestResult) -> Unit) {
         if (apiKey.isBlank()) {
@@ -48,7 +48,10 @@ object GeminiKeyTester {
                             400 -> "Invalid key format"
                             403 -> "Key rejected (check it's enabled for Gemini API)"
                             429 -> "Rate limited, but key looks valid"
-                            else -> "Server returned $code"
+                            else -> {
+                                val detail = try { JSONObject(it.body?.string().orEmpty()).optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
+                                if (detail.isNotBlank()) "HTTP $code: $detail" else "Server returned $code"
+                            }
                         }
                         onResult(KeyTestResult.Failure(msg))
                     }
