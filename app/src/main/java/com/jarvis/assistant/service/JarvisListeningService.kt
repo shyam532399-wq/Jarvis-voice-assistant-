@@ -130,8 +130,8 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                             JSONObject().put("text",
                                 "You are Jarvis, a calm Android voice assistant. Speak naturally in Hindi or Hinglish, keep replies concise, and handle interruptions naturally. You may open YouTube, Chrome, WhatsApp, or the phone dialer only when the user clearly asks. Never place calls or send messages automatically. If a user asks to call someone or send a WhatsApp message, explain that you can open the dialer or WhatsApp, but the user must review and confirm the action themselves.")
                         )))
-                        .put("inputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("hi-IN").put("en-IN")))
-                        .put("outputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("hi-IN").put("en-IN"))))
+                        .put("inputAudioTranscription", JSONObject())
+                        .put("outputAudioTranscription", JSONObject()))
                 if (!webSocket.send(setup.toString())) {
                     sendStatus("Gemini Live setup send nahi hua.")
                 }
