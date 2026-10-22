@@ -165,7 +165,10 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                     }
                     if (root.has("error")) {
                         val error = root.optJSONObject("error")?.optString("message").orEmpty()
+                        liveReady = false
+                        liveFailed = true
                         sendStatus(ReliabilityErrors.forSocket(null, error))
+                        webSocket.close(1000, "Gemini Live setup error")
                     }
                 } catch (e: Exception) {
                     sendStatus("Live response parse nahi hua: " + (e.message ?: "unknown error").take(100))
@@ -184,8 +187,14 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
                 if (running && code != 1000) sendStatus(ReliabilityErrors.forSocket(code, reason))
             }
         })
-        while (running && !Thread.currentThread().isInterrupted && !liveFailed) {
+        val connectStartedAt = System.currentTimeMillis()
+        while (running && !Thread.currentThread().isInterrupted && !liveFailed &&
+            (liveReady || System.currentTimeMillis() - connectStartedAt < 15000L)) {
             try { Thread.sleep(250) } catch (_: InterruptedException) { break }
+        }
+        if (running && !liveReady && !liveFailed) {
+            liveFailed = true
+            sendStatus("Gemini Live 15 second mein ready nahi hua. Network/API key check kar raha hoon; retry hoga.")
         }
         liveReady = false
         try { liveSocket?.close(1000, "Jarvis stopped") } catch (_: Exception) {}
