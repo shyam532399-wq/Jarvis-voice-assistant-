@@ -123,7 +123,7 @@ class JarvisListeningService : Service(), TextToSpeech.OnInitListener {
             override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
                 val setup = JSONObject()
                     .put("setup", JSONObject()
-                        .put("model", "models/gemini-3.8-live")
+                        .put("model", "models/gemini-3.1-flash-live-preview")
                         .put("generationConfig", JSONObject()
                             .put("responseModalities", JSONArray().put("AUDIO")))
                         .put("systemInstruction", JSONObject().put("parts", JSONArray().put(
